@@ -1,0 +1,32 @@
+// The demo program from the design: functions with and without return values,
+// short-circuit `or`, a call inside a condition, char replacement and a reachable division by zero.
+
+fun greet(int a, str b) {
+  int c = scale(a)
+  print(c)
+  print(b)
+}
+
+fun scale(int v) int {
+  if v > 100 {
+    return 0
+  }
+  return v * 20
+}
+
+MAIN cmd {
+  if len(cmd) == 2 {
+    int x = cmd[0]
+    if x < 10 or x > 20 {
+      greet(x, "hello")
+    } else if scale(x) == 300 {
+      int y = 100 / (x - cmd[1])   // crashes when cmd[1] == 15
+      print(y)
+    } else {
+      cmd[1] = 65
+      print(cmd)
+    }
+  } else {
+    print("usage")
+  }
+}

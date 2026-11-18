@@ -1,0 +1,16 @@
+// Magic bytes: random inputs almost never reach the jackpot, but each byte check is one flip away.
+MAIN cmd {
+  if len(cmd) == 4 {
+    if cmd[0] == 98 {            // 'b'
+      if cmd[1] == 117 {         // 'u'
+        if cmd[2] == 103 {       // 'g'
+          if cmd[3] == 33 {      // '!'
+            print("jackpot")
+            int boom = 100 / (cmd[1] - cmd[2] - 14)   // 117 - 103 - 14 == 0
+            print(boom)
+          }
+        }
+      }
+    }
+  }
+}

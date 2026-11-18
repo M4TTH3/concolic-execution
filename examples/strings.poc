@@ -1,0 +1,31 @@
+// Symbolic strs: comparisons over symbolic bytes and lengths, a symbolic index, and a str return value.
+
+fun capitalise(str s) str {
+  if len(s) > 0 {
+    int c = s[0]
+    if c >= 97 and c <= 122 {   // 'a'..'z'
+      s[0] = c - 32
+    }
+  }
+  return s
+}
+
+MAIN cmd {
+  str word = capitalise(cmd)    // cmd itself is unchanged: strs are copied
+  if word == "HELLO" {
+    print("greeting")
+  } else if word < "M" {
+    print("first half")
+  } else {
+    print("second half")
+  }
+
+  if len(cmd) > 1 {
+    int i = cmd[0] - 48         // a leading digit picks an index
+    if i >= 0 and i < len(cmd) {
+      if cmd[i] == 90 {         // 'Z' at that index
+        print("found Z")
+      }
+    }
+  }
+}
