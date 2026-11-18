@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>POC replay</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="title">
+      <h1 id="program-name">POC replay</h1>
+      <p class="subtitle">Concolic test runs, replayed instruction by instruction</p>
+    </div>
+    <ul class="stats" id="stats" aria-label="Exploration summary"></ul>
+  </header>
+
+  <nav class="testbar" aria-label="Tests">
+    <button class="nav-btn" id="prev-test" type="button" title="Previous test (Shift+←)">‹ Prev</button>
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <button class="nav-btn" id="next-test" type="button" title="Next test (Shift+→)">Next ›</button>
+  </nav>
+
+  <section class="testcard" id="testcard" aria-live="polite">
+    <div class="input-row">
+      <span class="field-label">Input</span>
+      <code class="input-value" id="input-value"></code>
+      <div class="toggle" role="group" aria-label="Input format">
+        <button type="button" id="fmt-text" aria-pressed="true">Text</button>
+        <button type="button" id="fmt-hex" aria-pressed="false">Hex</button>
+      </div>
+      <span class="outcome" id="outcome"></span>
+    </div>
+    <p class="lineage" id="lineage"></p>
+  </section>
+
+  <main class="workspace">
+    <section class="pane source-pane" aria-label="Source">
+      <div class="pane-head">
+        <h2>Source</h2>
+        <span class="status-line" id="status-line"></span>
+      </div>
+      <pre class="source" id="source"></pre>
+    </section>
+
+    <aside class="side">
+      <section class="pane" aria-label="Variables">
+        <div class="pane-head">
+          <h2>Variables</h2>
+          <label class="check"><input type="checkbox" id="show-temps"> Temporaries</label>
+        </div>
+        <nav class="callstack" id="callstack" aria-label="Call stack"></nav>
+        <table class="vars" id="vars"></table>
+      </section>
+
+      <section class="pane" aria-label="Path constraints">
+        <div class="pane-head">
+          <h2>Path constraints</h2>
+          <span class="count" id="constraint-count"></span>
+        </div>
+        <ol class="constraints" id="constraints"></ol>
+      </section>
+
+      <section class="pane" aria-label="Output">
+        <div class="pane-head"><h2>Output</h2></div>
+        <div class="console" id="console"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="transport" aria-label="Playback">
+    <div class="buttons">
+      <button type="button" id="btn-start" title="Back to the start (Home)" aria-label="Back to the start">⏮</button>
+      <button type="button" id="btn-back" title="Step back (←)" aria-label="Step back">◀︎</button>
+      <button type="button" id="btn-play" class="play" title="Play or pause (Space)" aria-label="Play">▶︎</button>
+      <button type="button" id="btn-fwd" title="Step forward (→)" aria-label="Step forward">▶︎|</button>
+      <button type="button" id="btn-end" title="Jump to the end (End)" aria-label="Jump to the end">⏭</button>
+    </div>
+    <div class="timeline">
+      <div class="ticks" id="ticks" aria-hidden="true"></div>
+      <input type="range" id="scrubber" min="-1" max="0" value="-1" aria-label="Step">
+    </div>
+    <span class="step-count" id="step-count"></span>
+    <label class="speed">
+      <span>Speed</span>
+      <input type="range" id="speed" min="0" max="100" value="45" aria-label="Playback speed">
+      <span id="speed-value"></span>
+    </label>
+    <div class="toggle" role="group" aria-label="Step by">
+      <button type="button" id="mode-instr" aria-pressed="true" title="Each step is one bytecode instruction">Instruction</button>
+      <button type="button" id="mode-line" aria-pressed="false" title="Each step runs to the next source line">Line</button>
+    </div>
+    <label class="check" title="When a test finishes playing, continue with the next one (A)">
+      <input type="checkbox" id="autoplay" aria-label="Autoplay tests"> Autoplay tests
+    </label>
+  </footer>
+
+  <div class="missing" id="missing" hidden>
+    <h2>No replay data next to this page</h2>
+    <p>This viewer reads <code>replay-data.js</code> from its own folder. Run <code>poc your-program.poc</code> to write it, then reload.</p>
+  </div>
+
+  <script src="replay-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

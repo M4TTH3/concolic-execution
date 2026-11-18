@@ -49,26 +49,32 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
         private val temps = HashSet<Ref>()
         private val code = mutableListOf<Instruction>()
 
+        /** Source span of each instruction in [code] (same index), for the replay viewer. */
+        private val spans = mutableListOf<Span>()
+        private lateinit var currentSpan: Span
+
         /** Label id -> pc, or -1 while unplaced. Jump instructions hold label ids until [finish]. */
         private val labelPcs = mutableListOf<Int>()
 
         fun genFunction(f: FunDecl): FunctionCode {
+            currentSpan = f.body.span
             val params = f.params.map { declareVar(it.name, it.type) }
             genBlock(f.body)
-            return finish(params, f.returnType?.let(::sizeOf))
+            return finish(f.body, params, f.returnType?.let(::sizeOf))
         }
 
         fun genMain(m: MainDecl): FunctionCode {
+            currentSpan = m.body.span
             val cmd = declareVar(m.param, PocType.STR)
             genBlock(m.body)
-            return finish(listOf(cmd), returnSize = null)
+            return finish(m.body, listOf(cmd), returnSize = null)
         }
 
-        private fun finish(params: List<Ref>, returnSize: Int?): FunctionCode {
+        private fun finish(body: Block, params: List<Ref>, returnSize: Int?): FunctionCode {
             // Unreachable in functions with a return type (the checker guarantees every path returns).
-            emit(Return(null))
+            withSpan(body.closingBrace) { emit(Return(null)) }
             val resolved = code.map { if (it is JumpInstruction) it.retarget(labelPcs[it.target]) else it }
-            return FunctionCode(name, index, params, returnSize, frameSize, resolved, slotNames)
+            return FunctionCode(name, index, params, returnSize, frameSize, resolved, slotNames, spans.toList(), temps.toSet())
         }
 
         // ---- frame layout ----
@@ -93,6 +99,18 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
 
         private fun emit(ins: Instruction) {
             code += ins
+            spans += currentSpan
+        }
+
+        /** Instructions emitted inside [body] are attributed to [span] (innermost wins). */
+        private inline fun <T> withSpan(span: Span, body: () -> T): T {
+            val outer = currentSpan
+            currentSpan = span
+            try {
+                return body()
+            } finally {
+                currentSpan = outer
+            }
         }
 
         private fun newLabel(): Int = labelPcs.size.also { labelPcs += -1 }
@@ -103,19 +121,20 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
             val last = code.lastOrNull()
             if (last is Jump && last.target == label) {
                 code.removeLast()
+                spans.removeLast()
                 labelPcs.replaceAll { pc -> if (pc == code.size + 1) code.size else pc }
             }
             labelPcs[label] = code.size
         }
 
-        private fun site(kind: SiteKind, pos: Pos, description: String): BranchSite =
-            BranchSite(sites.size, name, pos, kind, description).also { sites += it }
+        private fun site(kind: SiteKind, pos: Pos, span: Span, description: String): BranchSite =
+            BranchSite(sites.size, name, pos, kind, description, span).also { sites += it }
 
         // ---- statements ----
 
         private fun genBlock(block: Block) = block.stmts.forEach(::genStmt)
 
-        private fun genStmt(s: Stmt) {
+        private fun genStmt(s: Stmt): Unit = withSpan(s.span) {
             when (s) {
                 is VarDecl -> {
                     val value = genExpr(s.init)
@@ -134,7 +153,7 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
                     val target = vars.getValue(s.target)
                     val index = genExpr(s.index)
                     val value = genExpr(s.value)
-                    emit(StoreByte(target, index, value, site(SiteKind.BOUNDS, s.pos, "${s.target}[${s.index.render()}] in bounds")))
+                    emit(StoreByte(target, index, value, site(SiteKind.BOUNDS, s.pos, s.span, "${s.target}[${s.index.render()}] in bounds")))
                 }
                 is Print -> {
                     val value = genExpr(s.value)
@@ -154,7 +173,7 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
                 genCond(cond, then, next)
                 place(then)
                 genBlock(block)
-                emit(Jump(end))
+                withSpan(block.closingBrace) { emit(Jump(end)) }
                 place(next)
             }
             s.elseBlock?.let(::genBlock)
@@ -177,10 +196,10 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
                     place(mid)
                     genCond(c.right, ifTrue, ifFalse)
                 }
-                is Compare -> {
+                is Compare -> withSpan(c.span) {
                     val a = genExpr(c.left)
                     val b = genExpr(c.right)
-                    val site = site(SiteKind.IF, c.pos, c.render())
+                    val site = site(SiteKind.IF, c.pos, c.span, c.render())
                     emit(
                         if (typeOf(c.left) == PocType.INT) IntCmpJump(c.op, a, b, ifTrue, site)
                         else StrCmpJump(c.op, a, b, ifTrue, site),
@@ -193,7 +212,9 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
         // ---- expressions ----
 
         /** Emits code for [e] and returns the Ref holding its value: a variable's own slot, or a fresh temp. */
-        private fun genExpr(e: Expr): Ref = when (e) {
+        private fun genExpr(e: Expr): Ref = withSpan(e.span) { genExprIn(e) }
+
+        private fun genExprIn(e: Expr): Ref = when (e) {
             is IntLit -> temp(PocType.INT).also { emit(ConstInt(it, e.value.toInt())) }
             is StrLit -> temp(PocType.STR).also { emit(ConstStr(it, e.value)) }
             is Var -> vars.getValue(e.name)
@@ -210,7 +231,7 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
                         ArithOp.ADD -> IntAdd(dst, a, b)
                         ArithOp.SUB -> IntSub(dst, a, b)
                         ArithOp.MUL -> IntMul(dst, a, b)
-                        ArithOp.DIV -> IntDiv(dst, a, b, site(SiteKind.DIV_ZERO, e.pos, "${e.right.render()} != 0"))
+                        ArithOp.DIV -> IntDiv(dst, a, b, site(SiteKind.DIV_ZERO, e.pos, e.right.span, "${e.right.render()} != 0"))
                     },
                 )
                 dst
@@ -223,7 +244,7 @@ private class BytecodeGen(private val program: Program, private val maxStrLen: I
                 val s = vars.getValue(e.target)
                 val i = genExpr(e.index)
                 val dst = temp(PocType.INT)
-                emit(LoadByte(dst, s, i, site(SiteKind.BOUNDS, e.pos, "${e.target}[${e.index.render()}] in bounds")))
+                emit(LoadByte(dst, s, i, site(SiteKind.BOUNDS, e.pos, e.span, "${e.target}[${e.index.render()}] in bounds")))
                 dst
             }
             is CallExpr -> genCall(e, keepResult = true)!!

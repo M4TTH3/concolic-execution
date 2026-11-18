@@ -6,3 +6,6 @@ build/
 out/
 # fwcd kotlin-language-server cache
 kls_database.db
+
+# HTML replays written by the CLI
+results/

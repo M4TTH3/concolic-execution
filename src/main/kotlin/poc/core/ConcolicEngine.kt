@@ -46,6 +46,15 @@ class ExecutionResult(
     val signature: List<Branch> get() = constraints.map { it.branch }
 }
 
+/** Watches a run instruction by instruction (used to record replays). */
+interface StepObserver {
+    /** Called once MAIN's frame (with the input) is set up, before the first instruction. */
+    fun onStart(conc: ConcreteState, sym: SymbolicState) {}
+
+    /** Called after the instruction at [pc] of [fn] ran, including one that threw a runtime error or hit a limit. */
+    fun onStep(fn: FunctionCode, pc: Int, conc: ConcreteState, sym: SymbolicState)
+}
+
 /** Runs one input through the program, concretely and symbolically at once. */
 class ConcolicEngine(
     val program: BytecodeProgram,
@@ -54,7 +63,7 @@ class ConcolicEngine(
     private val maxSteps: Int = 10_000,
     private val maxCallDepth: Int = 200,
 ) {
-    fun run(input: Input): ExecutionResult {
+    fun run(input: Input, observer: StepObserver? = null): ExecutionResult {
         val bytes = input.bytes()
         require(bytes.size <= program.maxStrLen) { "input $input is longer than the max str length ${program.maxStrLen}" }
 
@@ -62,16 +71,26 @@ class ConcolicEngine(
         val sym = SymbolicState(tm, program)
         conc.enterMain(bytes)
         sym.enterMain(inputs)
+        observer?.onStart(conc, sym)
 
         var steps = 0
         val outcome = try {
             while (!conc.halted) {
                 if (steps >= maxSteps) throw LimitExceeded("step limit of $maxSteps exceeded")
                 val frame = conc.frame
-                val instruction = frame.fn.code[frame.pc]
+                val pc = frame.pc
+                val instruction = frame.fn.code[pc]
                 frame.pc++
                 steps++
-                instruction.execute(conc, sym)
+                if (observer == null) {
+                    instruction.execute(conc, sym)
+                } else {
+                    try {
+                        instruction.execute(conc, sym)
+                    } finally {
+                        observer.onStep(frame.fn, pc, conc, sym)
+                    }
+                }
             }
             Outcome.Completed
         } catch (e: PocRuntimeError) {

@@ -22,9 +22,10 @@ fun concolic(
     source: String,
     maxLen: Int = DEFAULT_MAX_STR_LEN,
     seed: String = "",
+    replay: Boolean = false,
     block: ConcolicScope.() -> Unit,
 ) {
-    ConcolicTester(source.trimIndent(), maxLen, seed).use { ConcolicScope(it).block() }
+    ConcolicTester(source.trimIndent(), maxLen, seed, recordReplay = replay).use { ConcolicScope(it).block() }
 }
 
 class ConcolicScope(val tester: ConcolicTester) {

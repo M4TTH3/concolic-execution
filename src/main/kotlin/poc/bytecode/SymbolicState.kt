@@ -28,6 +28,9 @@ class SymbolicState(val tm: TermManager, val program: BytecodeProgram) {
     val pathConstraints = mutableListOf<PathConstraint>()
     val maxStrLen: Int get() = program.maxStrLen
 
+    /** Shadow frame [i] from the bottom, parallel to [ConcreteState.frameAt]. Observers must not modify it. */
+    fun shadowAt(i: Int): Array<Term?> = frames[i]
+
     fun enterMain(inputs: SymbolicInputs) {
         val main = program.main
         val shadow = arrayOfNulls<Term>(main.frameSize)
@@ -156,14 +159,19 @@ class SymbolicState(val tm: TermManager, val program: BytecodeProgram) {
     private fun strEq(a: StrValue, b: StrValue): Term {
         val la = lenOr(a.ref, a.len)
         val parts = mutableListOf(eq(la, lenOr(b.ref, b.len)))
-        val lenConcrete = lenTerm(a.ref) == null
-        for (k in 0 until maxStrLen) {
-            if (lenConcrete && k >= a.len) break // k < len(a) is false, the conjunct is trivially true
+        // If either length is concrete (L), the first conjunct forces both to L: exactly bytes 0 until L
+        // matter, unguarded. Positions past L would only add `k < len(a) => ...` conjuncts that are vacuous.
+        val knownLen = when {
+            lenTerm(a.ref) == null -> a.len
+            lenTerm(b.ref) == null -> b.len
+            else -> null
+        }
+        for (k in 0 until (knownLen ?: maxStrLen)) {
             val ta = byteTerm(a.ref, k)
             val tb = byteTerm(b.ref, k)
             if (ta == null && tb == null && a.data[k] == b.data[k]) continue
             val same = eq(ta ?: bv8(a.data[k]), tb ?: bv8(b.data[k]))
-            parts.add(if (lenConcrete) same else mk(Kind.IMPLIES, ult(bv32(k), la), same))
+            parts.add(if (knownLen != null) same else mk(Kind.IMPLIES, ult(bv32(k), la), same))
         }
         return and(parts)
     }
@@ -173,9 +181,17 @@ class SymbolicState(val tm: TermManager, val program: BytecodeProgram) {
         val la = lenOr(a.ref, a.len)
         val lb = lenOr(b.ref, b.len)
         val shorter = ult(la, lb)
-        val lensConcrete = lenTerm(a.ref) == null && lenTerm(b.ref) == null
+        val aKnown = lenTerm(a.ref) == null
+        val bKnown = lenTerm(b.ref) == null
         var result = shorter
-        val positions = if (lensConcrete) minOf(a.len, b.len) else maxStrLen
+        // Positions at or past a concrete length can never be "in both", so their fold step is just `shorter`:
+        // start the fold at the smallest concrete length instead.
+        val positions = when {
+            aKnown && bKnown -> minOf(a.len, b.len)
+            aKnown -> a.len
+            bKnown -> b.len
+            else -> maxStrLen
+        }
         for (k in positions - 1 downTo 0) {
             val ta = byteTerm(a.ref, k)
             val tb = byteTerm(b.ref, k)
@@ -187,7 +203,9 @@ class SymbolicState(val tm: TermManager, val program: BytecodeProgram) {
                 val bb = tb ?: bv8(b.data[k])
                 ite(eq(ba, bb), result, ult(ba, bb))
             }
-            result = if (lensConcrete) decided else ite(mk(Kind.AND, ult(bv32(k), la), ult(bv32(k), lb)), decided, shorter)
+            // k < len holds for a concrete side here, so only symbolic lengths need a guard.
+            val guards = listOfNotNull(if (aKnown) null else ult(bv32(k), la), if (bKnown) null else ult(bv32(k), lb))
+            result = if (guards.isEmpty()) decided else ite(and(guards), decided, shorter)
         }
         return result
     }

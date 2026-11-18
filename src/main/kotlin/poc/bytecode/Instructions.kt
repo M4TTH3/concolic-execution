@@ -13,6 +13,10 @@ import poc.parser.quotePoc
  */
 sealed interface Instruction {
     fun execute(conc: ConcreteState, sym: SymbolicState)
+
+    /** The current-frame slot this instruction writes, if any (the replay recorder reports it even when
+     *  the value does not change, e.g. writing 0 into a fresh slot). */
+    val writes: Ref? get() = null
 }
 
 /** An instruction with a jump target; the compiler emits label ids and then retargets to pcs. */
@@ -25,6 +29,8 @@ sealed interface JumpInstruction : Instruction {
 // ---- data movement ----
 
 data class ConstInt(val dst: Ref, val value: Int) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         sym.setInt(dst, null)
         conc.writeInt(dst, value)
@@ -33,6 +39,8 @@ data class ConstInt(val dst: Ref, val value: Int) : Instruction {
 
 /** Each char of [value] is one byte. */
 data class ConstStr(val dst: Ref, val value: String) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         sym.clear(dst)
         conc.writeStr(dst, value.toByteArray(Charsets.ISO_8859_1))
@@ -43,6 +51,8 @@ data class ConstStr(val dst: Ref, val value: String) : Instruction {
 
 /** Copies [src] to [dst] byte for byte (an int, or a whole str including its length). */
 data class Copy(val dst: Ref, val src: Ref) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         sym.copy(dst, src)
         conc.copy(dst, src)
@@ -52,6 +62,8 @@ data class Copy(val dst: Ref, val src: Ref) : Instruction {
 // ---- int arithmetic (32-bit wrapping, matching QF_BV) ----
 
 data class IntAdd(val dst: Ref, val a: Ref, val b: Ref) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         val x = conc.readInt(a)
         val y = conc.readInt(b)
@@ -61,6 +73,8 @@ data class IntAdd(val dst: Ref, val a: Ref, val b: Ref) : Instruction {
 }
 
 data class IntSub(val dst: Ref, val a: Ref, val b: Ref) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         val x = conc.readInt(a)
         val y = conc.readInt(b)
@@ -70,6 +84,8 @@ data class IntSub(val dst: Ref, val a: Ref, val b: Ref) : Instruction {
 }
 
 data class IntMul(val dst: Ref, val a: Ref, val b: Ref) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         val x = conc.readInt(a)
         val y = conc.readInt(b)
@@ -80,6 +96,8 @@ data class IntMul(val dst: Ref, val a: Ref, val b: Ref) : Instruction {
 
 /** Truncating signed division. The implicit `b != 0` check is a branch the engine can flip to find crashes. */
 data class IntDiv(val dst: Ref, val a: Ref, val b: Ref, val site: BranchSite) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         val x = conc.readInt(a)
         val y = conc.readInt(b)
@@ -95,6 +113,8 @@ data class IntDiv(val dst: Ref, val a: Ref, val b: Ref, val site: BranchSite) : 
 }
 
 data class IntNeg(val dst: Ref, val a: Ref) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         val x = conc.readInt(a)
         sym.setInt(dst, sym.intTerm(a)?.let { sym.mk(Kind.BITVECTOR_NEG, it) })
@@ -105,6 +125,8 @@ data class IntNeg(val dst: Ref, val a: Ref) : Instruction {
 // ---- str operations ----
 
 data class StrLen(val dst: Ref, val s: Ref) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         sym.setInt(dst, sym.lenTerm(s))
         conc.writeInt(dst, conc.strLen(s))
@@ -113,6 +135,8 @@ data class StrLen(val dst: Ref, val s: Ref) : Instruction {
 
 /** `dst = s[i]` as an int 0..255, after an implicit bounds check. */
 data class LoadByte(val dst: Ref, val s: Ref, val i: Ref, val site: BranchSite) : Instruction {
+    override val writes: Ref get() = dst
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         val index = conc.readInt(i)
         checkBounds(conc, sym, s, i, index, site)
@@ -126,6 +150,8 @@ data class LoadByte(val dst: Ref, val s: Ref, val i: Ref, val site: BranchSite) 
 
 /** `s[i] = v`: stores the low 8 bits of v, after an implicit bounds check. */
 data class StoreByte(val s: Ref, val i: Ref, val v: Ref, val site: BranchSite) : Instruction {
+    override val writes: Ref get() = s
+
     override fun execute(conc: ConcreteState, sym: SymbolicState) {
         val index = conc.readInt(i)
         val value = conc.readInt(v)

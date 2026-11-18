@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test
 import poc.bytecode.*
 import poc.parser.CmpOp
 import poc.parser.Pos
+import poc.parser.Span
 
 /** System tests for the front end: source text in, exact bytecode or exact compile errors out. */
 class CompilationTest {
@@ -78,7 +79,7 @@ class CompilationTest {
             }
             """,
         )
-        val site = BranchSite(0, "f", Pos(2, 6), SiteKind.IF, "v > 100")
+        val site = BranchSite(0, "f", Pos(2, 6), SiteKind.IF, "v > 100", Span(Pos(2, 6), Pos(2, 13)))
         assertEquals(
             listOf(
                 ConstInt(Ref(4, 4), 100),

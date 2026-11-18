@@ -10,9 +10,15 @@ import poc.bytecode.PathConstraint
 import poc.bytecode.SymbolicInputs
 import poc.compile.DEFAULT_MAX_STR_LEN
 import poc.compile.PocCompiler
+import poc.core.replay.ReplayRecorder
+import poc.core.replay.RunReplay
+import poc.core.replay.TermPrinter
+import poc.core.replay.TermTable
 
 /** A negated path constraint that the solver turned into a new input. */
 class Flip(
+    /** Run number (1-based) of the parent run whose constraint was negated. */
+    val parentRun: Int,
     /** Index of the negated constraint in the parent run's path. */
     val index: Int,
     val constraint: PathConstraint,
@@ -36,6 +42,8 @@ class Step(
     val flips: List<Flip>,
     /** The flip that produced this run's input, or null for the initial seed. */
     val producedBy: Flip?,
+    /** The run's instruction-by-instruction replay, when the tester records them. */
+    val replay: RunReplay? = null,
 )
 
 class SolverStats {
@@ -66,13 +74,15 @@ class DivergenceError(val flip: Flip, val run: ExecutionResult, message: String)
  * objects in the process, so testers must not be used concurrently.
  */
 class ConcolicTester(
-    source: String,
+    val source: String,
     val maxLen: Int = DEFAULT_MAX_STR_LEN,
     seed: String = "",
     maxSteps: Int = 10_000,
     maxCallDepth: Int = 200,
     /** Receives a readable dump of every solver query (for `--dump-queries`). */
     private val queryLog: ((String) -> Unit)? = null,
+    /** Record every run's replay ([Step.replay]) for the HTML viewer. */
+    val recordReplay: Boolean = false,
 ) : AutoCloseable {
     // Compile first: a compile error must not leave native objects behind.
     val program: BytecodeProgram = PocCompiler.compile(source, maxLen)
@@ -86,6 +96,9 @@ class ConcolicTester(
     }
     private val inputs = SymbolicInputs(tm, maxLen)
     private val engine = ConcolicEngine(program, tm, inputs, maxSteps, maxCallDepth)
+
+    /** Readable, interned renderings of every term the replay data mentions (shared by all runs). */
+    internal val termTable = TermTable(TermPrinter(inputName = program.main.slotNames.getValue(program.main.params.single())))
 
     private val queue = ArrayDeque<Pair<Input, Flip?>>()
 
@@ -115,7 +128,8 @@ class ConcolicTester(
      */
     fun step(): Step? {
         val (input, producedBy) = queue.removeFirstOrNull() ?: return null
-        val run = engine.run(input)
+        val recorder = if (recordReplay) ReplayRecorder(termTable) else null
+        val run = engine.run(input, recorder)
         val signature = run.signature
 
         if (producedBy != null && !signature.startsWith(producedBy.target)) {
@@ -132,7 +146,7 @@ class ConcolicTester(
                 queue.addLast(flip.input to flip)
             }
         }
-        return Step(steps.size + 1, run, flips, producedBy).also { steps += it }
+        return Step(steps.size + 1, run, flips, producedBy, recorder?.result()).also { steps += it }
     }
 
     private fun divergenceMessage(flip: Flip, run: ExecutionResult): String = buildString {
@@ -169,7 +183,7 @@ class ConcolicTester(
         val flip = when {
             result.isSat -> {
                 stats.sat++
-                Flip(j, constraint, modelInput(), target)
+                Flip(steps.size + 1, j, constraint, modelInput(), target)
             }
             result.isUnsat -> {
                 stats.unsat++

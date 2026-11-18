@@ -5,6 +5,7 @@ import poc.compile.DEFAULT_MAX_STR_LEN
 import poc.core.ConcolicTester
 import poc.core.DivergenceError
 import poc.core.ExplorationReport
+import poc.core.replay.ReplayWriter
 import java.io.File
 import kotlin.system.exitProcess
 
@@ -14,6 +15,8 @@ private const val USAGE = """usage: poc <file.poc> [options]
   --seed STR         initial input for cmd (default "")
   --dump-bytecode    print the compiled bytecode before exploring
   --dump-queries     print every solver query
+  --results DIR      where to write the HTML replay (default results; it goes in DIR/<file name>/)
+  --no-replay        do not write the HTML replay
 exit status: 0 explored, 1 compile errors, 2 bad usage, 3 internal error (a run diverged)"""
 
 fun main(args: Array<String>) {
@@ -23,6 +26,8 @@ fun main(args: Array<String>) {
     var seed = ""
     var dumpBytecode = false
     var dumpQueries = false
+    var resultsDir = "results"
+    var replay = true
 
     val it = args.iterator()
     fun value(flag: String): String = if (it.hasNext()) it.next() else fail("$flag needs a value")
@@ -33,6 +38,8 @@ fun main(args: Array<String>) {
             "--seed" -> seed = value(arg)
             "--dump-bytecode" -> dumpBytecode = true
             "--dump-queries" -> dumpQueries = true
+            "--results" -> resultsDir = value(arg)
+            "--no-replay" -> replay = false
             "-h", "--help" -> {
                 println(USAGE)
                 return
@@ -44,14 +51,14 @@ fun main(args: Array<String>) {
     val source = File(path).takeIf { it.isFile }?.readText() ?: fail("cannot read $path")
 
     val tester = try {
-        ConcolicTester(source, maxLen, seed, queryLog = if (dumpQueries) ::println else null)
+        ConcolicTester(source, maxLen, seed, queryLog = if (dumpQueries) ::println else null, recordReplay = replay)
     } catch (e: CompileException) {
         e.errors.forEach { System.err.println("$path:$it") }
         exitProcess(1)
     }
     val status = tester.use {
         if (dumpBytecode) println(it.program.disassemble())
-        try {
+        val status = try {
             print(it.explore(maxRuns).render())
             0
         } catch (e: DivergenceError) {
@@ -60,6 +67,12 @@ fun main(args: Array<String>) {
             System.err.println("poc: internal error: ${e.message}")
             3
         }
+        // Written while the tester is open: the data file still renders cvc5 terms.
+        if (replay) {
+            val index = ReplayWriter.write(it, File(path).nameWithoutExtension, File(resultsDir, File(path).nameWithoutExtension))
+            println("replay: ${index.path}")
+        }
+        status
     }
     if (status != 0) exitProcess(status)
 }

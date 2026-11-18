@@ -16,6 +16,12 @@ class ConcreteState(val program: BytecodeProgram, private val maxCallDepth: Int)
     val frame: Frame get() = frames.last()
     val halted: Boolean get() = frames.isEmpty()
 
+    /** Number of frames on the call stack (0 once MAIN has returned). */
+    val depth: Int get() = frames.size
+
+    /** Frame [i] from the bottom (0 is MAIN). Read-only view for observers such as the replay recorder. */
+    fun frameAt(i: Int): Frame = frames[i]
+
     fun enterMain(cmd: ByteArray) {
         val main = program.main
         frames.addLast(Frame(main, ByteArray(main.frameSize), retDst = null))

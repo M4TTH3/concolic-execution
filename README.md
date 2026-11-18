@@ -17,9 +17,23 @@ so the tester also finds crashing inputs.
 
 ```
 poc <file.poc> [--max-len 16] [--max-runs 1000] [--seed STR] [--dump-bytecode] [--dump-queries]
+               [--results DIR] [--no-replay]
 ```
 
 `./gradlew installDist` builds a launcher at `build/install/poc/bin/poc`.
+
+## Replay viewer
+
+Every run also writes an HTML replay to `results/<file name>/index.html` (change the directory with `--results`, turn it off with `--no-replay`). Open it in a browser to watch each generated test execute:
+
+- **Test bar:** switch between tests. A dot marks each test's outcome, and the card shows the input and the flip that produced it, linked back to its parent test.
+- **Source:** the exact sub-expression just executed is highlighted. A ghost after it shows its value (`= 15`), a branch decision (`false`), or the crash. Gutter marks show the lines this test has run.
+- **Variables:** the call stack and each frame's variables, with concrete values in blue and, for values that depend on the input, their symbolic term in violet (`cmd[0] * 20`).
+- **Path constraints:** listed as each branch records one, in readable form. A constraint whose flip produced another test links to it.
+- **Output:** what `print` emitted so far, then the outcome.
+- **Playback:** play/pause, a speed slider and a timeline marked with branches, prints and crashes. You can step by instruction or by line. With **Autoplay tests** on, a finished test holds briefly on its outcome, then playback continues with the next test and stops after the last one. Keys: Space plays, ←/→ step, Shift+←/→ switch test, Home/End jump to the ends, A toggles autoplay.
+
+The page is a static template (`index.html`, `app.js`, `style.css`, from `src/main/resources/replay/`) plus a generated `replay-data.js`, loaded with a `<script>` tag so the page works when opened straight from disk. The data is a compact delta format: one entry per executed instruction, holding only the slots that instruction wrote. `RunReplay` in `core/replay/ReplayRecorder.kt` documents it.
 
 Requires JDK 21. The Gradle wrapper fetches Gradle 9.9.1, and the cvc5 Java API plus its native library come
 from Maven Central (`io.github.cvc5:cvc5:1.4.2`).
@@ -137,6 +151,7 @@ The test classes:
 | `NextFlipTest` | step-by-step BFS order and exact flips and inputs |
 | `ExplorationTest` | whole searches: crashes, magic bytes, overflow, symbolic str ops, determinism |
 | `ExamplesTest` | every file in `examples/` explores to completion |
+| `ReplayTest` | exact source spans per instruction; the delta stream reconstructs every variable; readable terms; deterministic replay files |
 
 A divergence fails any test that hits it, because `step()` and `explore()` throw.
 
