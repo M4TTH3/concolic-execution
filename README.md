@@ -20,7 +20,14 @@ poc <file.poc> [--max-len 16] [--max-runs 1000] [--seed STR] [--dump-bytecode] [
                [--results DIR] [--no-replay]
 ```
 
-`./gradlew installDist` builds a launcher at `build/install/poc/bin/poc`.
+To run without Gradle, build the self-contained jar once and use it from anywhere (Java 21+):
+
+```bash
+./gradlew fatJar
+java -jar build/libs/poc.jar examples/demo.poc
+```
+
+`poc.jar` (about 14 MB) bundles the Kotlin runtime, ANTLR runtime, cvc5 and the replay viewer. The cvc5 native library inside is the one for the machine that built the jar, so build it on each OS/architecture you run it on. Replays go to `results/` under the current directory. `./gradlew installDist` builds a launcher script at `build/install/poc/bin/poc` instead.
 
 ## Replay viewer
 

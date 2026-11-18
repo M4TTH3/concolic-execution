@@ -76,6 +76,24 @@ application {
     applicationName = "poc"
 }
 
+/**
+ * A self-contained runnable jar: `java -jar build/libs/poc.jar examples/demo.poc`.
+ * It bundles the runtime classpath, including the cvc5 JNI library for the platform that built it
+ * (cvc5 loads it from the classpath), so the jar runs on that OS/architecture with any Java 21+.
+ */
+tasks.register<Jar>("fatJar") {
+    group = "build"
+    description = "Builds build/libs/poc.jar, runnable with java -jar and no other files."
+    archiveFileName = "poc.jar"
+    manifest { attributes("Main-Class" to application.mainClass) }
+    from(sourceSets.main.map { it.output })
+    dependsOn(configurations.runtimeClasspath)
+    from({ configurations.runtimeClasspath.get().filter { it.name.endsWith(".jar") }.map(::zipTree) })
+    // Every dependency jar has its own manifest and possibly a module descriptor; keep only ours.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude("module-info.class", "META-INF/versions/*/module-info.class", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+}
+
 tasks.test {
     useJUnitPlatform()
     testLogging {
