@@ -1,0 +1,152 @@
+// vault.poc: a tiny command processor for a four-slot vault.
+//
+// A command packet is   'V'  <op>  <args...>  <checksum>
+// where <checksum> is the sum of every byte before it, modulo 256. Random inputs
+// almost never get past the checksum; concolic testing solves for it.
+//
+//   V S <slot> <value> <sum>          store a byte in one of the four slots
+//   V D <low> <high> <sum>            print 1000 / (high - low)
+//   V M <hi> <lo> <sum>               reserve hi * 2^24 + lo cells of a 16-cell buffer
+//   V U <k0> <k1> <k2> <k3> <sum>     unlock the vault with a four-byte key
+//   V H <count> <payload...> <sum>    heartbeat: echo back <count> payload bytes
+//
+// Run it:  java -jar build/libs/poc.jar examples/vault.poc
+// The program has several bugs. They are listed at the bottom of this file (spoilers).
+
+// ---- loops (POC has no loop statement, so these recurse) ----
+
+// Sum of buf[from], buf[from + 1], ..., buf[upto - 1].
+fun sum_bytes(str buf, int from, int upto) int {
+  if from >= upto {
+    return 0
+  }
+  return buf[from] + sum_bytes(buf, from + 1, upto)
+}
+
+// Copies source[3 + at], ..., source[3 + stop - 1] into out[at], ..., out[stop - 1].
+fun fill(str source, str out, int at, int stop) str {
+  if at >= stop {
+    return out
+  }
+  out[at] = source[3 + at]
+  return fill(source, out, at + 1, stop)
+}
+
+// ---- packet checks ----
+
+fun checksum_ok(str packet) int {
+  int last = len(packet) - 1
+  int total = sum_bytes(packet, 0, last)
+  int expected = total - (total / 256) * 256
+  if packet[last] == expected {
+    return 1
+  }
+  return 0
+}
+
+// A toy rolling hash of the unlock key.
+fun key_hash(int a0, int a1, int a2, int a3) int {
+  return ((a0 * 31 + a1) * 31 + a2) * 31 + a3
+}
+
+// ---- commands ----
+
+fun store(int slot, int value) {
+  str vault = "...."
+  if slot > 4 {
+    print("no such slot")
+    return
+  }
+  vault[slot] = value
+  print(vault)
+}
+
+fun divide(int low, int high) {
+  if high < low {
+    print("high below low")
+    return
+  }
+  print(1000 / (high - low))
+}
+
+fun allocate(int hi, int lo) {
+  str buffer = "................"
+  int wanted = hi * 16777216 + lo
+  if wanted > 15 {
+    print("too big")
+    return
+  }
+  buffer[wanted] = 35            // '#' marks the end of the reservation
+  print(buffer)
+}
+
+fun unlock(int k0, int k1, int k2, int k3) {
+  if key_hash(k0, k1, k2, k3) != 3417674 {
+    print("wrong key")
+    return
+  }
+  print("unlocked")
+  // Reward the caller with one letter of the secret, picked by the last key byte.
+  str secret = "swordfish"
+  str hint = "?"
+  int pos = k3 - (k3 / 16) * 16
+  hint[0] = secret[pos]
+  print(hint)
+}
+
+fun heartbeat(str pkt) {
+  int count = pkt[2]
+  if count > 8 {
+    print("max 8 bytes")
+    return
+  }
+  print(fill(pkt, "........", 0, count))
+}
+
+// ---- entry point ----
+
+MAIN cmd {
+  if cmd == "help" {
+    print("V S|D|M|U|H ...")
+    return
+  }
+  if len(cmd) < 3 {
+    print("too short")
+    return
+  }
+  if cmd[0] != 86 {              // 'V'
+    print("not a packet")
+    return
+  }
+  if checksum_ok(cmd) == 0 {
+    print("bad checksum")
+    return
+  }
+  int op = cmd[1]
+  int size = len(cmd)
+  if op == 83 and size == 5 {             // 'S'
+    store(cmd[2], cmd[3])
+  } else if op == 68 and size == 5 {      // 'D'
+    divide(cmd[2], cmd[3])
+  } else if op == 77 and size == 5 {      // 'M'
+    allocate(cmd[2], cmd[3])
+  } else if op == 85 and size == 7 {      // 'U'
+    unlock(cmd[2], cmd[3], cmd[4], cmd[5])
+  } else if op == 72 and size > 3 {       // 'H'
+    heartbeat(cmd)
+  } else {
+    print("unknown command")
+  }
+}
+
+// ---- planted bugs (spoilers) ----
+//
+// 1. store: `slot > 4` should be `slot >= 4`. Slot 4 writes past the end of the vault.
+// 2. divide: `high < low` lets high == low through, dividing by zero.
+// 3. allocate: hi * 2^24 overflows 32 bits for hi >= 128, so `wanted` goes negative,
+//    passes the `> 15` check, and indexes before the start of the buffer.
+// 4. unlock: only reachable with a key whose hash is exactly 3417674 (e.g. "open").
+//    The hint index is k3 mod 16, but the secret has only 9 letters.
+// 5. heartbeat: Heartbleed. `count` is checked against the output buffer (8) but not
+//    against the payload actually sent, so a short packet with a big count reads past
+//    its end.
